@@ -1,28 +1,64 @@
-# NimbusNote retrieval-first Q&A bot
+# NimbusNote · Retrieval-first Q&A
 
-This is a self-contained RAG mini-project over the three included NimbusNote documents. It does **not** send the question straight to a model: it first indexes local Markdown sections, ranks them with TF–IDF cosine similarity, exposes the matched passages and their scores, and only then creates an extractive answer from that evidence.
+> A transparent, dependency-free RAG mini-project over the supplied NimbusNote documentation.
 
-## Run it
+This bot retrieves evidence before it answers. It is deliberately **not** a thin wrapper around an LLM: every answer is formed from sentences in the highest-ranked local document sections.
 
-Requires Python 3.10+ and no packages:
+## Why it is RAG
+
+```text
+Question
+   │
+   ▼
+Markdown sections ──► TF–IDF + cosine ranking ──► top matching passages
+                                                       │
+                                                       ▼
+                                              extractive grounded answer
+```
+
+The command line output makes the boundary visible: `RETRIEVED PASSAGES` (with file, section, and score) is always shown before `ANSWER`.
+
+## Quick start
+
+Python 3.10+ is the only requirement.
 
 ```powershell
 python app.py "Why can't I upload an image?"
 python app.py "What happens when I downgrade?" --top-k 2
 ```
 
-The CLI prints `RETRIEVED PASSAGES` before `ANSWER`, so the retrieval step is observable and inspectable.
+Example output:
 
-## Verify it
+```text
+RETRIEVED PASSAGES
+[1] 03-troubleshooting.md — "I can't upload an image" (score: 0.592)
+...
+
+ANSWER
+Image attachments are a Pro and Team plan feature only.
+```
+
+## Design notes
+
+| Stage | Implementation | Guardrail |
+| --- | --- | --- |
+| Ingest | Heading-level chunks from `01-*`, `02-*`, and `03-*` Markdown documents | Operational files such as this README are never indexed. |
+| Retrieve | Local TF–IDF vectors and cosine similarity | Section headings receive a modest metadata boost. |
+| Answer | Extractive sentence selection from retrieved chunks | Unknown questions return an explicit “not found” response. |
+
+## Verify
 
 ```powershell
 python -m unittest -v
 ```
 
-## How it works
+The test suite covers relevant retrieval, grounded answers, missing-information handling, and invalid result limits.
 
-1. `load_chunks` parses each Markdown file into heading-level chunks and retains the filename and heading as metadata.
-2. `Retriever` tokenizes each chunk, builds a local TF–IDF index, and ranks chunks by cosine similarity to the question.
-3. `answer` selects relevant sentences solely from those retrieved chunks. If none overlap with the question, it explicitly says that the answer is absent instead of inventing one.
+## Project structure
 
-The compact, dependency-free implementation makes the key RAG boundary easy to audit in `rag.py`.
+```text
+app.py          # CLI: show evidence, then answer
+rag.py          # parsing, ranking, and grounded answer selection
+test_rag.py     # standard-library test suite
+0*-*.md         # the fixed NimbusNote knowledge base
+```
