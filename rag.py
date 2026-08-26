@@ -60,6 +60,7 @@ def load_chunks(documents_dir: Path) -> list[Chunk]:
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.startswith("# "):
                 title = line[2:].strip()
+                heading = title
             elif line.startswith("## "):
                 if body:
                     chunks.append(Chunk(path.name, heading, "\n".join(body).strip()))
@@ -76,7 +77,9 @@ class Retriever:
         if not chunks:
             raise ValueError("No Markdown sections found to index.")
         self.chunks = chunks
-        self.doc_terms = [Counter(tokens(f"{c.heading} {c.text}")) for c in chunks]
+        # Repeat a section heading once: concise headings are valuable retrieval
+        # metadata, but body content still carries most of the weight.
+        self.doc_terms = [Counter(tokens(f"{c.heading} {c.heading} {c.text}")) for c in chunks]
         document_frequency = Counter({term: 0 for terms in self.doc_terms for term in terms})
         for terms in self.doc_terms:
             for term in terms:
@@ -91,7 +94,11 @@ class Retriever:
         return {term: value / magnitude for term, value in raw.items()} if magnitude else {}
 
     def search(self, question: str, limit: int = 3) -> list[SearchResult]:
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
         query = self._vector(Counter(query_tokens(question)))
+        if not query:
+            return [SearchResult(chunk, 0.0) for chunk in self.chunks[:limit]]
         ranked = [
             SearchResult(chunk, sum(query.get(term, 0.0) * value for term, value in vector.items()))
             for chunk, vector in zip(self.chunks, self.vectors)
@@ -104,11 +111,16 @@ def answer(question: str, results: list[SearchResult]) -> str:
     if not results or results[0].score == 0:
         return "I couldn't find an answer in the indexed NimbusNote documents."
     query_terms = set(query_tokens(question))
-    candidates: list[tuple[float, str]] = []
-    for result in results:
+    candidates: list[tuple[float, int, str]] = []
+    seen: set[str] = set()
+    for rank, result in enumerate(results):
         for sentence in SENTENCE_RE.split(re.sub(r"\s+", " ", result.chunk.text)):
             overlap = len(query_terms.intersection(tokens(sentence)))
-            if overlap:
-                candidates.append((result.score * overlap, sentence.strip()))
-    selected = [sentence for _, sentence in sorted(candidates, reverse=True)[:2]]
+            normalized = sentence.strip()
+            if overlap and normalized not in seen:
+                seen.add(normalized)
+                # A small rank tiebreaker keeps the highest-ranked passage
+                # primary when equally relevant sentences are available.
+                candidates.append((result.score * overlap, -rank, normalized))
+    selected = [sentence for _, _, sentence in sorted(candidates, reverse=True)[:2]]
     return " ".join(selected) or results[0].chunk.text.replace("\n", " ")
