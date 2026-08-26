@@ -21,3 +21,7 @@ class RagTests(unittest.TestCase):
     def test_unknown_question_does_not_hallucinate(self):
         results = Retriever(load_chunks(DOCS)).search("What colour is the NimbusNote logo?", limit=3)
         self.assertTrue(answer("What colour is the NimbusNote logo?", results).startswith("I couldn't find"))
+
+    def test_invalid_result_limit_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Retriever(load_chunks(DOCS)).search("sync", limit=0)
